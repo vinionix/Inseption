@@ -15,8 +15,8 @@ clean:
 
 fclean:
 	$(COMPOSE) down -v --rmi all --remove-orphans
-	rm -rf /home/$(USER)/data/mariadb
-	rm -rf /home/$(USER)/data/wordpress
+	sudo rm -rf /home/$(USER)/data/mariadb
+	sudo rm -rf /home/$(USER)/data/wordpress
 
 re: fclean up
 
