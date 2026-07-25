@@ -1,11 +1,11 @@
 services:
   mariadb:
     build: ./requirements/mariadb
-    image: mariadb
+    image: mariadb:inception
     container_name: mariadb
     restart: always
     env_file:
-      - .env.example
+      - .env
     secrets:
       - db_password
       - db_root_password
