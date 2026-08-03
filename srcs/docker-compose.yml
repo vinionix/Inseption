@@ -1,4 +1,23 @@
 services:
+
+  wordpress:
+    build: ./requirements/wordpress
+    image: wordpress:inception
+    container_name: wordpress
+    restart: always
+    depends_on:
+      - mariadb
+    env_file:
+      - .env
+    secrets:
+      - db_password
+      - wp_password
+      - wp_root_password
+    volumes:
+      - wordpress_data:/var/www/html
+    networks:
+      - inception
+
   mariadb:
     build: ./requirements/mariadb
     image: mariadb:inception
@@ -17,8 +36,15 @@ services:
 secrets:
   db_password:
     file: ./secrets/db_password.txt
+
   db_root_password:
     file: ./secrets/db_root_password.txt
+
+  wp_password:
+    file: ./secrets/wp_password.txt
+
+  wp_root_password:
+    file: ./secrets/wp_root_password.txt
 
 volumes:
   mariadb_data:
@@ -27,6 +53,12 @@ volumes:
       type: none
       o: bind
       device: /home/vfidelis/data/mariadb
+  wordpress_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /home/vfidelis/data/wordpress
 
 networks:
   inception:
