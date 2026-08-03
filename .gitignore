@@ -1,3 +1,9 @@
-# Local configuration and secrets
+# Local configuration
 srcs/.env
+
+# Docker secrets
+srcs/secrets/*
+!srcs/secrets/README.md
+
+# Legacy/root secrets path
 secrets/*
