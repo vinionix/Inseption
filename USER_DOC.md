@@ -1,24 +1,28 @@
 # User Documentation
 
-## Overview
+## Services provided
 
-This project runs a WordPress website with NGINX, PHP-FPM and MariaDB in separate Docker containers.
+The stack provides three services:
 
-The only externally exposed service is NGINX on HTTPS port `443`.
+- **NGINX**: HTTPS entrypoint on port `443`.
+- **WordPress + PHP-FPM**: website and PHP runtime.
+- **MariaDB**: persistent WordPress database.
+
+Only NGINX is directly exposed to the host.
 
 ## Prerequisites
 
-Before starting the project, make sure Docker and Docker Compose are installed and that the repository contains a local `srcs/.env` file.
+The project must run inside the Inception Linux virtual machine with Docker, Docker Compose and Make installed.
 
-Create it from the example when necessary:
+Create the public configuration file when needed:
 
 ```bash
 cp srcs/.env.example srcs/.env
 ```
 
-## Required secrets
+## Credentials and secrets
 
-Create the following local files:
+Passwords are stored locally in:
 
 ```text
 srcs/secrets/db_password.txt
@@ -27,15 +31,13 @@ srcs/secrets/wp_password.txt
 srcs/secrets/wp_root_password.txt
 ```
 
-Each file must contain only the corresponding password.
-
 Recommended permissions:
 
 ```bash
 chmod 600 srcs/secrets/*.txt
 ```
 
-These files must not be committed to Git.
+These files must not be committed to Git. Public usernames, emails, database names and the domain are configured in `srcs/.env`.
 
 ## Start the infrastructure
 
@@ -51,25 +53,7 @@ or:
 make up
 ```
 
-The Makefile creates the persistent data directories and starts the Compose stack.
-
-## Access WordPress
-
-The configured domain is:
-
-```text
-https://vfidelis.42.fr
-```
-
-The domain must resolve to the IP address of the virtual machine from the computer where the browser is running.
-
-Because the project uses a self-signed certificate, the browser may display a certificate warning during local development.
-
-## WordPress administration
-
-The WordPress administrator account is configured through the public variables in `srcs/.env` and the administrator password secret.
-
-The project also creates a second non-administrator WordPress user.
+The Makefile checks the local configuration and secrets, creates the persistent host directories and starts the Compose stack.
 
 ## Stop the infrastructure
 
@@ -77,29 +61,45 @@ The project also creates a second non-administrator WordPress user.
 make down
 ```
 
-This stops and removes the containers while keeping persistent data.
+This removes the containers while preserving persistent project data.
 
-## View logs
+## Access the site
 
-```bash
-make logs
+Front-end:
+
+```text
+https://vfidelis.42.fr
 ```
 
-You can also inspect an individual service:
+Administration panel:
 
-```bash
-docker logs nginx
-docker logs wordpress
-docker logs mariadb
+```text
+https://vfidelis.42.fr/wp-admin
 ```
 
-## Check running containers
+The domain must resolve to the virtual machine IP from the computer running the browser.
+
+The project uses a self-signed TLS certificate, so the browser may display a certificate warning during local evaluation.
+
+## WordPress users
+
+The administrator username and email are configured through `srcs/.env`. Its password is read from `wp_root_password.txt`.
+
+A second regular WordPress user is also created. Its password is read from `wp_password.txt`.
+
+## Check service status
+
+```bash
+make status
+```
+
+or:
 
 ```bash
 docker ps
 ```
 
-Expected services:
+Expected containers:
 
 ```text
 nginx
@@ -109,21 +109,49 @@ mariadb
 
 Only NGINX should publish port `443` to the host.
 
-## Reset the project
+## View logs
+
+All services:
 
 ```bash
-make fclean
+make logs
 ```
 
-This command performs a destructive cleanup, including persistent project data. Do not use it when you need to preserve the current WordPress installation or database.
+Individual services:
+
+```bash
+docker logs nginx
+docker logs wordpress
+docker logs mariadb
+```
+
+## Validate configuration
+
+```bash
+make config
+```
+
+This asks Docker Compose to render and validate the current configuration without starting new services.
 
 ## Persistent data
 
-The project keeps database and WordPress files under:
+Project data is stored under:
 
 ```text
 /home/vfidelis/data/mariadb
 /home/vfidelis/data/wordpress
 ```
 
-Destroying and recreating a container does not remove these files unless the volumes/data directories are explicitly deleted.
+Stopping or recreating containers does not remove this data unless the volumes or host data directories are explicitly deleted.
+
+## Full reset
+
+```bash
+make fclean
+```
+
+This is destructive. It removes project containers, images, volumes and the persistent project data directories.
+
+## Final checks
+
+Before peer evaluation, follow [`EVALUATION.md`](EVALUATION.md) to test clean startup, TLS, ports, users, database access, persistence and PID 1 behavior.

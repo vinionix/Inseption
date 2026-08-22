@@ -1,4 +1,4 @@
-This project has been created as part of the 42 curriculum by vfidelis.
+*This project has been created as part of the 42 curriculum by vfidelis.*
 
 # Inception
 
@@ -79,10 +79,11 @@ make up
 make down
 ```
 
-### Logs
+### Logs and status
 
 ```bash
 make logs
+make status
 ```
 
 ### Validate Compose
@@ -101,46 +102,71 @@ make fclean
 
 ### Access
 
-The configured domain is:
+The configured site is:
 
 ```text
 https://vfidelis.42.fr
+```
+
+The WordPress administration panel is:
+
+```text
+https://vfidelis.42.fr/wp-admin
 ```
 
 The machine opening the site must resolve `vfidelis.42.fr` to the IP address of the Inception virtual machine. Because the project generates a self-signed TLS certificate, a browser warning is expected until the certificate is explicitly trusted.
 
 ## Project description
 
-### Docker and the virtual machine
+### Virtual Machines vs Docker
 
-The virtual machine provides an isolated Linux host. Docker then isolates each project service at process level while sharing the VM kernel. This is lighter than creating one complete virtual machine per service and makes the infrastructure reproducible from Dockerfiles and Compose.
+| Virtual Machine | Docker container |
+| --- | --- |
+| Virtualizes a complete operating system | Isolates processes while sharing the host kernel |
+| Requires more memory and disk space | Usually lighter and faster to start |
+| Includes its own kernel | Uses the VM/host kernel |
+| Useful for strong OS-level isolation | Useful for reproducible service isolation |
 
-### Docker network vs host network
+In this project, the VM is the isolated Linux host and Docker separates the individual application services inside that VM.
 
-The project uses a dedicated bridge network named `inception`.
+### Secrets vs Environment Variables
 
-With a Docker bridge network, containers receive private addresses and resolve other services by name. For example, NGINX reaches PHP-FPM through `wordpress:9000`, and WordPress reaches the database through `mariadb:3306`.
+| Environment variable | Docker secret |
+| --- | --- |
+| Suitable for non-sensitive configuration | Intended for sensitive values such as passwords |
+| Available directly in a process environment | Mounted as a file under `/run/secrets` |
+| Easy to expose accidentally in debugging/output | Keeps credentials separate from public configuration |
 
-Host networking would remove that network isolation and is not used. Only NGINX explicitly publishes port `443`.
+This repository uses `srcs/.env` for public configuration and local secret files for passwords. Real secret files must not be committed.
 
-### Docker volumes vs bind mounts
+### Docker Network vs Host Network
 
-A Docker named volume has a Docker-managed identity and lifecycle. A bind mount maps a host path directly into a container.
+| Docker bridge network | Host network |
+| --- | --- |
+| Containers have isolated network namespaces | Containers share the host network stack |
+| Services can resolve each other by Compose service name | Services use the host interfaces directly |
+| Ports are exposed only when explicitly published | Container services are directly tied to host networking |
+| Provides better service isolation for this architecture | Removes much of the intended container network isolation |
 
-This project declares named volumes with the local driver and uses the driver's `device` option so the persistent data is physically stored at the required host locations:
+The project uses the `inception` bridge network. NGINX reaches PHP-FPM through `wordpress:9000`, while WordPress reaches MariaDB through `mariadb:3306`. Host networking and Docker links are not used.
+
+### Docker Volumes vs Bind Mounts
+
+| Docker named volume | Bind mount |
+| --- | --- |
+| Has a Docker-managed volume identity | Maps a host filesystem path directly |
+| Visible through Docker volume commands | Managed primarily as a host path |
+| Has an independent container lifecycle | Exists independently as a normal host directory |
+| Useful for persistent container data | Useful when direct host-path control is needed |
+
+This project declares named volumes with the local driver and uses the driver's `device` option so data is physically stored under the required host paths:
 
 ```text
 /home/vfidelis/data/mariadb
 /home/vfidelis/data/wordpress
 ```
 
-The MariaDB volume is mounted at `/var/lib/mysql`. The WordPress volume is mounted at `/var/www/html` and is also mounted read-only in NGINX so NGINX can serve static files.
-
-### Secrets vs environment variables
-
-Public configuration belongs in `srcs/.env` and is documented in `srcs/.env.example`.
-
-Passwords are stored in local secret files and mounted by Docker Compose under `/run/secrets/...`. They are not embedded in Dockerfiles or committed environment templates.
+MariaDB mounts its volume at `/var/lib/mysql`. WordPress mounts its volume at `/var/www/html`, and NGINX mounts the same WordPress volume read-only so it can serve static files.
 
 ### PID 1 and foreground processes
 
@@ -150,12 +176,12 @@ Each service ends its initialization by replacing the shell with the real server
 - WordPress runs PHP-FPM in foreground.
 - NGINX runs with `daemon off;`.
 
-This keeps the actual service as PID 1 so Docker can manage signals and container lifecycle correctly.
+This lets Docker manage signals and container lifecycle correctly.
 
 ## Documentation
 
 - [`USER_DOC.md`](USER_DOC.md): how to start, stop, access and operate the project.
-- [`DEV_DOC.md`](DEV_DOC.md): architecture, build details, volumes, networking, debugging and maintenance.
+- [`DEV_DOC.md`](DEV_DOC.md): architecture, setup, build details, volumes, networking, debugging and maintenance.
 - [`EVALUATION.md`](EVALUATION.md): final local checks before peer evaluation.
 
 ## Resources
