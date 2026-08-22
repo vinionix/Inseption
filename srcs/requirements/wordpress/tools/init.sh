@@ -55,13 +55,14 @@ if [ ! -f "${WP_PATH}/wp-config.php" ]; then
 	echo "Creating wp-config.php..."
 
 	wp --allow-root \
+		--quiet \
 		--path="${WP_PATH}" \
 		config create \
 		--dbname="${MYSQL_DATABASE}" \
 		--dbuser="${MYSQL_USER}" \
 		--dbhost="${WORDPRESS_DB_HOST}" \
 		--prompt=dbpass \
-		< /run/secrets/db_password
+		< /run/secrets/db_password > /dev/null
 fi
 
 if ! wp --allow-root \
@@ -71,6 +72,7 @@ then
 	echo "Installing WordPress..."
 
 	wp --allow-root \
+		--quiet \
 		--path="${WP_PATH}" \
 		core install \
 		--url="https://${DOMAIN_NAME}" \
@@ -79,7 +81,7 @@ then
 		--admin_email="${WP_ADMIN_EMAIL}" \
 		--skip-email \
 		--prompt=admin_password \
-		< /run/secrets/wp_root_password
+		< /run/secrets/wp_root_password > /dev/null
 fi
 
 if ! wp --allow-root \
@@ -90,13 +92,14 @@ then
 	echo "Creating WordPress user..."
 
 	wp --allow-root \
+		--quiet \
 		--path="${WP_PATH}" \
 		user create \
 		"${WP_USER}" \
 		"${WP_USER_EMAIL}" \
 		--role=author \
 		--prompt=user_pass \
-		< /run/secrets/wp_password
+		< /run/secrets/wp_password > /dev/null
 fi
 
 chown -R www-data:www-data "${WP_PATH}"
