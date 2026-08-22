@@ -1,148 +1,178 @@
-# Inseption — Docker Infrastructure
+This project has been created as part of the 42 curriculum by vfidelis.
 
-Projeto de infraestrutura e conteinerização desenvolvido no contexto da 42, com foco em entender como serviços separados são construídos, configurados, conectados e mantidos com Docker Compose.
+# Inception
 
-A implementação atual orquestra **WordPress + MariaDB** em uma rede Docker dedicada, com volumes persistentes, configuração por ambiente e uso de Docker secrets para credenciais.
+## Description
 
-## Objetivo
+Inception is a system-administration project that builds a small web infrastructure with Docker Compose inside a virtual machine.
 
-Construir a infraestrutura sem depender de uma aplicação monolítica pronta e, no processo, praticar:
+The mandatory stack is split into three dedicated containers:
 
-- criação de imagens;
-- isolamento de serviços;
-- comunicação entre containers;
-- persistência de dados;
-- configuração por variáveis de ambiente;
-- gerenciamento de segredos;
-- automação de build e execução.
-
-## Arquitetura atual
+- **NGINX**: the only external entrypoint, exposed on HTTPS port `443` with TLS 1.2 and TLS 1.3.
+- **WordPress + PHP-FPM**: the application container, listening internally on port `9000` through FastCGI.
+- **MariaDB**: the database container, listening internally on port `3306`.
 
 ```text
-                 Docker Compose
-                       │
-           ┌───────────┴───────────┐
-           │                       │
-      WordPress  ─────────────> MariaDB
-           │                       │
-  wordpress_data             mariadb_data
-           │                       │
-           └──── inception network ┘
+Browser
+   |
+   | HTTPS :443
+   v
+NGINX
+   |
+   | FastCGI :9000
+   v
+WordPress + PHP-FPM
+   |
+   | MariaDB :3306
+   v
+MariaDB
 ```
 
-O `srcs/docker-compose.yml` atualmente define:
+Only NGINX publishes a host port. WordPress and MariaDB communicate exclusively through the private Docker network.
 
-### WordPress
+## Instructions
 
-- build local em `requirements/wordpress`;
-- acesso às variáveis do `.env`;
-- secrets de banco e WordPress;
-- volume persistente em `/var/www/html`;
-- conexão à rede `inception`.
+### Prerequisites
 
-### MariaDB
+Run the project inside the Linux virtual machine used for Inception with Docker Engine, Docker Compose v2 and GNU Make installed.
 
-- build local em `requirements/mariadb`;
-- secrets para usuário/root do banco;
-- persistência em `/var/lib/mysql`;
-- conexão à mesma rede interna.
-
-## Estrutura
-
-```text
-Inseption/
-├── Makefile
-└── srcs/
-    ├── .env.example
-    ├── docker-compose.yml
-    ├── requirements/
-    └── secrets/
-```
-
-A pasta `secrets/` do repositório contém documentação, não os arquivos reais de senha que o Compose espera em runtime.
-
-## Configuração
-
-Use o arquivo de exemplo como base:
+Create the public environment file from the tracked example when necessary:
 
 ```bash
 cp srcs/.env.example srcs/.env
 ```
 
-Preencha apenas valores locais/de desenvolvimento e **não versione o `.env` real**.
+Create the local secret files:
 
-Os arquivos de senha referenciados pelo Compose também devem ser criados localmente conforme a documentação em `srcs/secrets/` e permanecer fora do Git.
+```text
+srcs/secrets/db_password.txt
+srcs/secrets/db_root_password.txt
+srcs/secrets/wp_password.txt
+srcs/secrets/wp_root_password.txt
+```
 
-## Persistência
+Recommended permissions:
 
-A implementação usa bind mounts através de volumes nomeados:
+```bash
+chmod 600 srcs/secrets/*.txt
+```
 
-- `mariadb_data`
-- `wordpress_data`
+Passwords must remain local and must not be committed to Git.
 
-No estado atual, os caminhos apontam para:
+### Build and start
+
+From the repository root:
+
+```bash
+make
+```
+
+or:
+
+```bash
+make up
+```
+
+### Stop
+
+```bash
+make down
+```
+
+### Logs
+
+```bash
+make logs
+```
+
+### Validate Compose
+
+```bash
+make config
+```
+
+### Full reset
+
+```bash
+make fclean
+```
+
+`fclean` removes the project containers, images, volumes and persistent project data. Use it only when a full reset is intended.
+
+### Access
+
+The configured domain is:
+
+```text
+https://vfidelis.42.fr
+```
+
+The machine opening the site must resolve `vfidelis.42.fr` to the IP address of the Inception virtual machine. Because the project generates a self-signed TLS certificate, a browser warning is expected until the certificate is explicitly trusted.
+
+## Project description
+
+### Docker and the virtual machine
+
+The virtual machine provides an isolated Linux host. Docker then isolates each project service at process level while sharing the VM kernel. This is lighter than creating one complete virtual machine per service and makes the infrastructure reproducible from Dockerfiles and Compose.
+
+### Docker network vs host network
+
+The project uses a dedicated bridge network named `inception`.
+
+With a Docker bridge network, containers receive private addresses and resolve other services by name. For example, NGINX reaches PHP-FPM through `wordpress:9000`, and WordPress reaches the database through `mariadb:3306`.
+
+Host networking would remove that network isolation and is not used. Only NGINX explicitly publishes port `443`.
+
+### Docker volumes vs bind mounts
+
+A Docker named volume has a Docker-managed identity and lifecycle. A bind mount maps a host path directly into a container.
+
+This project declares named volumes with the local driver and uses the driver's `device` option so the persistent data is physically stored at the required host locations:
 
 ```text
 /home/vfidelis/data/mariadb
 /home/vfidelis/data/wordpress
 ```
 
-Isso funciona no ambiente para o qual o projeto foi configurado, mas é uma limitação de portabilidade. Uma evolução natural é parametrizar esses caminhos.
+The MariaDB volume is mounted at `/var/lib/mysql`. The WordPress volume is mounted at `/var/www/html` and is also mounted read-only in NGINX so NGINX can serve static files.
 
-## Rede
+### Secrets vs environment variables
 
-Os serviços compartilham uma rede bridge dedicada:
+Public configuration belongs in `srcs/.env` and is documented in `srcs/.env.example`.
 
-```text
-inception
-```
+Passwords are stored in local secret files and mounted by Docker Compose under `/run/secrets/...`. They are not embedded in Dockerfiles or committed environment templates.
 
-Isso permite comunicação interna entre WordPress e MariaDB sem colocar todos os serviços diretamente na rede padrão do host.
+### PID 1 and foreground processes
 
-## Como executar
+Each service ends its initialization by replacing the shell with the real server process using `exec`:
 
-O repositório possui um `Makefile` para automatizar o fluxo. Antes de subir o ambiente, garanta que:
+- MariaDB runs `mariadbd` in foreground.
+- WordPress runs PHP-FPM in foreground.
+- NGINX runs with `daemon off;`.
 
-1. Docker e Docker Compose estejam instalados;
-2. `srcs/.env` exista;
-3. os arquivos de secrets necessários existam localmente;
-4. os diretórios de dados existam ou sejam criados pelo fluxo definido no projeto.
+This keeps the actual service as PID 1 so Docker can manage signals and container lifecycle correctly.
 
-Depois, use os alvos disponíveis no `Makefile` para build/subida/limpeza conforme a configuração atual do projeto.
+## Documentation
 
-## Limitações atuais
+- [`USER_DOC.md`](USER_DOC.md): how to start, stop, access and operate the project.
+- [`DEV_DOC.md`](DEV_DOC.md): architecture, build details, volumes, networking, debugging and maintenance.
+- [`EVALUATION.md`](EVALUATION.md): final local checks before peer evaluation.
 
-A documentação descreve o código que existe hoje:
+## Resources
 
-- o Compose atual possui WordPress e MariaDB;
-- uma camada Nginx/TLS não aparece no arquivo Compose atual;
-- os caminhos de volumes estão vinculados ao usuário `/home/vfidelis`;
-- o projeto ainda pode evoluir até a arquitetura completa esperada pelo exercício da 42.
+References used while developing the project include:
 
-## Segurança
+- Docker Engine documentation
+- Docker Compose specification
+- Dockerfile best practices
+- NGINX documentation
+- OpenSSL documentation
+- PHP-FPM documentation
+- WordPress and WP-CLI documentation
+- MariaDB Server documentation
 
-Este repositório foi revisado para evitar confundir **estrutura de secrets** com **segredos reais**. Boas práticas para continuar o projeto:
+### AI usage
 
-- nunca commitar `.env` real;
-- nunca commitar arquivos de senha;
-- se uma credencial real entrar no histórico do Git, rotacioná-la mesmo após remover o arquivo;
-- não colocar senha em `Dockerfile` ou imagem;
-- preferir secrets/variáveis apenas no momento de execução.
+AI assistance was used to explain Docker, networking, FastCGI, PHP-FPM, TLS and PID 1 concepts; review configuration files; identify integration and security issues; draft repetitive infrastructure boilerplate; and prepare project documentation and evaluation checks.
 
-## O que este projeto demonstra
-
-- Docker e Docker Compose;
-- infraestrutura como código em pequena escala;
-- rede entre serviços;
-- persistência de dados;
-- separação de configuração e código;
-- secrets e preocupação com exposição de credenciais;
-- troubleshooting de serviços conteinerizados.
-
-## Documentação
-
-- [Technical Overview](docs/TECHNICAL_OVERVIEW.md) — topologia, persistência, networking, segurança, limitações e checklist de validação.
-
-## Autor
-
-Desenvolvido por [Vinícius Fidelis](https://github.com/vinionix) durante a formação na 42 Rio.
+The generated material was adapted to this repository and should be reviewed together with the running infrastructure before evaluation.
