@@ -2,6 +2,8 @@
 
 set -eu
 
+unset MYSQL_HOST
+
 DATA_DIR="/var/lib/mysql"
 SOCKET="/run/mysqld/mysqld.sock"
 
