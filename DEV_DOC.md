@@ -1,5 +1,16 @@
 # Developer Documentation
 
+## Prerequisites
+
+The project is designed to run inside the Inception Linux virtual machine.
+
+Required tools:
+
+- Docker Engine
+- Docker Compose v2
+- GNU Make
+- a shell environment capable of creating the local secret files
+
 ## Project structure
 
 ```text
@@ -8,6 +19,7 @@
 ├── README.md
 ├── USER_DOC.md
 ├── DEV_DOC.md
+├── EVALUATION.md
 └── srcs
     ├── .env
     ├── .env.example
@@ -19,7 +31,57 @@
         └── nginx
 ```
 
-Each service is built from its own Dockerfile. No application service image is used directly.
+Each mandatory service is built from its own Dockerfile. Application service images are not pulled directly.
+
+## Setup from scratch
+
+Clone the repository inside the VM and enter the project directory.
+
+Create the public environment file:
+
+```bash
+cp srcs/.env.example srcs/.env
+```
+
+Review the values in `srcs/.env`, especially the domain, database name, usernames and WordPress emails.
+
+Create the required secrets:
+
+```text
+srcs/secrets/db_password.txt
+srcs/secrets/db_root_password.txt
+srcs/secrets/wp_password.txt
+srcs/secrets/wp_root_password.txt
+```
+
+Set restrictive permissions:
+
+```bash
+chmod 600 srcs/secrets/*.txt
+```
+
+Do not commit the real secret files.
+
+## Build and launch
+
+From the repository root:
+
+```bash
+make up
+```
+
+The Makefile creates:
+
+```text
+/home/vfidelis/data/mariadb
+/home/vfidelis/data/wordpress
+```
+
+and then executes Docker Compose using:
+
+```bash
+docker compose -f srcs/docker-compose.yml --env-file srcs/.env
+```
 
 ## Architecture
 
@@ -39,29 +101,31 @@ WordPress / PHP-FPM :9000
 MariaDB :3306
 ```
 
-NGINX is the only service with a host-published port. WordPress and MariaDB remain reachable only from the internal Docker network.
+NGINX is the only service with a host-published port. WordPress and MariaDB remain reachable only through the internal Docker network.
 
 ## MariaDB
 
-The MariaDB image is based on Debian and installs the database server with `apt`.
+The MariaDB image is based on Debian and installs MariaDB with the package manager.
 
 The startup script:
 
 1. prepares MariaDB runtime directories;
-2. reads database passwords from `/run/secrets`;
+2. validates and reads database secrets from `/run/secrets`;
 3. initializes the data directory only when necessary;
-4. creates the WordPress database and database user;
-5. configures the local root password;
-6. removes anonymous users and the test database;
-7. starts `mariadbd` in foreground as PID 1.
+4. starts a temporary socket-only MariaDB instance;
+5. creates the WordPress database and database user;
+6. configures the local root password;
+7. removes anonymous users and the test database;
+8. shuts down the temporary instance;
+9. starts `mariadbd` in foreground as PID 1.
 
-MariaDB listens on port `3306` inside the Docker network but does not publish that port to the host.
+MariaDB listens on port `3306` inside the Docker network and does not publish that port to the host.
 
 ## WordPress and PHP-FPM
 
 The WordPress image installs PHP, PHP-FPM, the required PHP extensions, MariaDB client utilities and WP-CLI.
 
-The startup script waits for MariaDB, downloads WordPress if necessary, creates `wp-config.php`, installs the site and creates the configured users.
+Its startup script waits for MariaDB, downloads WordPress when necessary, creates `wp-config.php`, installs the site and creates the configured users.
 
 PHP-FPM listens on:
 
@@ -69,124 +133,148 @@ PHP-FPM listens on:
 0.0.0.0:9000
 ```
 
-This makes the FastCGI service available to NGINX through the internal Docker network without publishing port `9000` to the host.
+This makes FastCGI available to NGINX over the private Docker network without publishing port `9000` to the host.
 
-The main process is PHP-FPM in foreground mode.
+The final process is PHP-FPM in foreground mode.
 
 ## NGINX
 
-NGINX is the HTTPS entrypoint.
+NGINX is the only external entrypoint.
 
-Its startup script generates a self-signed certificate when the certificate files are absent and then starts NGINX in foreground mode.
+Its startup script creates a self-signed certificate when needed and then starts NGINX in foreground mode.
 
 The NGINX configuration:
 
 - listens on port `443` with SSL enabled;
-- permits TLS 1.2 and TLS 1.3;
+- allows TLS 1.2 and TLS 1.3;
 - serves static WordPress files from `/var/www/html`;
-- forwards PHP requests to `wordpress:9000` through FastCGI;
-- sends access and error logs to container stdout/stderr.
+- forwards PHP requests to `wordpress:9000` using FastCGI;
+- writes access/error logs to container stdout/stderr.
 
 ## Docker network
 
-All services join the `inception` Docker network.
+All mandatory services join the `inception` bridge network.
 
-Compose service names act as internal DNS names. For example:
+Compose service names provide internal DNS resolution:
 
 ```text
 wordpress:9000
 mariadb:3306
 ```
 
-No fixed container IP addresses are required.
+No fixed container IPs, host networking or Docker links are required.
 
-## Volumes
+## Volumes and persistent storage
 
-Two persistent named volumes are used:
+Two named volumes are declared in Compose:
 
-- MariaDB data mounted at `/var/lib/mysql`;
-- WordPress files mounted at `/var/www/html`.
+- MariaDB data -> `/var/lib/mysql`
+- WordPress files -> `/var/www/html`
 
-The volumes use host-backed storage under:
+The local volume driver points their physical storage to:
 
 ```text
 /home/vfidelis/data/mariadb
 /home/vfidelis/data/wordpress
 ```
 
-The WordPress volume is also mounted in the NGINX container so NGINX can serve static files while PHP execution remains in the WordPress container.
+The WordPress volume is mounted read-write in the WordPress container and read-only in NGINX.
+
+Container deletion therefore does not automatically delete the application data.
 
 ## Environment and secrets
 
-Public configuration belongs in `srcs/.env` and is documented in `srcs/.env.example`.
+`srcs/.env` contains non-secret configuration. `srcs/.env.example` documents the expected variables.
 
-Passwords belong in the files under `srcs/secrets/` and are mounted by Compose into `/run/secrets/...`.
+Passwords are read from Docker secrets mounted under `/run/secrets`. Passwords must not be embedded in Dockerfiles, the Compose file or tracked environment templates.
 
-Do not place passwords in Dockerfiles, committed environment files or source code.
+## Useful lifecycle commands
 
-## Build
-
-From the repository root:
+Build/start:
 
 ```bash
 make up
 ```
 
-Equivalent Compose operations use:
-
-```bash
-docker compose -f srcs/docker-compose.yml --env-file srcs/.env
-```
-
-## Stop
+Stop while preserving data:
 
 ```bash
 make down
 ```
 
-## Rebuild from scratch
+Show status:
+
+```bash
+make status
+```
+
+Follow logs:
+
+```bash
+make logs
+```
+
+Validate Compose:
+
+```bash
+make config
+```
+
+Full destructive rebuild:
 
 ```bash
 make re
 ```
 
-This is destructive because the current Makefile performs a full cleanup before rebuilding.
+## Useful Docker commands
 
-## Debugging
-
-Validate the Compose configuration:
-
-```bash
-docker compose -f srcs/docker-compose.yml --env-file srcs/.env config
-```
-
-Inspect services:
+Containers:
 
 ```bash
 docker ps
-```
-
-Inspect logs:
-
-```bash
 docker logs nginx
 docker logs wordpress
 docker logs mariadb
 ```
 
-Validate NGINX configuration:
+Volumes:
+
+```bash
+docker volume ls
+docker volume inspect srcs_mariadb_data
+docker volume inspect srcs_wordpress_data
+```
+
+Network:
+
+```bash
+docker network ls
+docker network inspect srcs_inception
+```
+
+NGINX validation:
 
 ```bash
 docker exec nginx nginx -t
 ```
 
-Validate WordPress installation:
+WordPress validation:
 
 ```bash
 docker exec wordpress wp --allow-root --path=/var/www/html core is-installed
 ```
 
-Test HTTPS locally after domain resolution is configured:
+MariaDB validation:
+
+```bash
+docker exec mariadb sh -c 'mariadb -u root -p"$(cat /run/secrets/db_root_password)" -e "SHOW DATABASES;"'
+```
+
+## Domain configuration
+
+`vfidelis.42.fr` must resolve to the VM IP from the machine used to access the site. This is host/VM configuration rather than a Docker image responsibility.
+
+After domain resolution is configured:
 
 ```bash
 curl -kI https://vfidelis.42.fr
@@ -194,13 +282,14 @@ curl -kI https://vfidelis.42.fr
 
 ## Development workflow
 
-When modifying a service, rebuild the corresponding image or restart the stack through Compose. Keep service-specific files inside the relevant directory under `srcs/requirements/`.
+Keep each service implementation under `srcs/requirements/<service>/`. Rebuild the affected image after changing a Dockerfile, startup script or application configuration.
 
-Before merging changes, verify that:
+Before considering a change complete, verify that:
 
 - all three containers remain running;
 - only port `443` is published;
-- WordPress can reach MariaDB;
-- NGINX can reach PHP-FPM;
+- NGINX reaches PHP-FPM;
+- WordPress reaches MariaDB;
 - data survives container recreation;
-- secret files are not tracked by Git.
+- real secret files remain untracked;
+- the clean-start checks in `EVALUATION.md` pass.
