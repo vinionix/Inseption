@@ -5,6 +5,7 @@ set -eu
 unset MYSQL_HOST
 
 DATA_DIR="/var/lib/mysql"
+BOOTSTRAP_LOG="/tmp/mariadb-bootstrap.log"
 
 mkdir -p /run/mysqld "${DATA_DIR}"
 chown -R mysql:mysql /run/mysqld "${DATA_DIR}"
@@ -35,10 +36,11 @@ if [ ! -d "${DATA_DIR}/mysql" ]; then
 
 	echo "Configuring MariaDB database..."
 
-	mariadbd \
+	if ! mariadbd \
 		--user=mysql \
 		--datadir="${DATA_DIR}" \
-		--bootstrap <<EOF
+		--bootstrap >"${BOOTSTRAP_LOG}" 2>&1 <<EOF
+FLUSH PRIVILEGES;
 CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\`;
 CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
 ALTER USER '${MYSQL_USER}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
@@ -49,6 +51,18 @@ DROP USER IF EXISTS ''@'${HOSTNAME}';
 DROP DATABASE IF EXISTS \`test\`;
 FLUSH PRIVILEGES;
 EOF
+	then
+		cat "${BOOTSTRAP_LOG}"
+		echo "Error: MariaDB bootstrap failed."
+		exit 1
+	fi
+
+	cat "${BOOTSTRAP_LOG}"
+	if grep -q "ERROR" "${BOOTSTRAP_LOG}"; then
+		echo "Error: MariaDB bootstrap reported an SQL error."
+		exit 1
+	fi
+	rm -f "${BOOTSTRAP_LOG}"
 fi
 
 echo "Starting MariaDB..."
