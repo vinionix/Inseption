@@ -5,7 +5,6 @@ set -eu
 unset MYSQL_HOST
 
 DATA_DIR="/var/lib/mysql"
-SOCKET="/run/mysqld/mysqld.sock"
 
 mkdir -p /run/mysqld "${DATA_DIR}"
 chown -R mysql:mysql /run/mysqld "${DATA_DIR}"
@@ -28,35 +27,18 @@ DB_ROOT_PASSWORD=$(cat /run/secrets/db_root_password)
 
 if [ ! -d "${DATA_DIR}/mysql" ]; then
 	echo "Initializing MariaDB database..."
-	mariadb-install-db --user=mysql --datadir="${DATA_DIR}"
+
+	mariadb-install-db \
+		--user=mysql \
+		--datadir="${DATA_DIR}" \
+		--auth-root-authentication-method=normal
+
+	echo "Configuring MariaDB database..."
 
 	mariadbd \
 		--user=mysql \
 		--datadir="${DATA_DIR}" \
-		--socket="${SOCKET}" \
-		--skip-networking &
-
-	server_pid=$!
-	attempt=0
-
-	until mariadb-admin ping \
-		--protocol=socket \
-		--socket="${SOCKET}" \
-		--silent
-	do
-		attempt=$((attempt + 1))
-		if [ "${attempt}" -ge 30 ]; then
-			echo "Error: temporary MariaDB server did not become ready."
-			kill "${server_pid}" 2>/dev/null || true
-			exit 1
-		fi
-		sleep 1
-	done
-
-	mariadb \
-		--protocol=socket \
-		--socket="${SOCKET}" \
-		-u root <<EOF
+		--bootstrap <<EOF
 CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\`;
 
 CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%'
@@ -77,15 +59,6 @@ DROP DATABASE IF EXISTS \`test\`;
 
 FLUSH PRIVILEGES;
 EOF
-
-	mariadb-admin \
-		-u root \
-		-p"${DB_ROOT_PASSWORD}" \
-		--protocol=socket \
-		--socket="${SOCKET}" \
-		shutdown
-
-	wait "${server_pid}" 2>/dev/null || true
 fi
 
 echo "Starting MariaDB..."
